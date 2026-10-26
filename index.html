@@ -792,6 +792,35 @@ async function predict3D(box) {
 }
 
 const recInput = new Float32Array(3 * 112 * 112);
+
+// Face recognition embedding used by Face ID and attendance.
+// Returns the model's 256-dimensional normalized embedding.
+async function predictEmbedding(box) {
+  if (!recSess) throw new Error('Recognition model is not loaded yet.');
+  const bw = box.x2 - box.x1, bh = box.y2 - box.y1;
+  if (!(bw > 0 && bh > 0)) throw new Error('Invalid face box.');
+  const side = Math.max(bw, bh) * (1 + 2 * 0.15);
+  const cx = (box.x1 + box.x2) / 2, cy = (box.y1 + box.y2) / 2;
+  const sx = cx - side / 2, sy = cy - side / 2;
+  lmCtx.fillStyle = '#000';
+  lmCtx.fillRect(0, 0, 112, 112);
+  lmCtx.drawImage(video, sx, sy, side, side, 0, 0, 112, 112);
+  const img = lmCtx.getImageData(0, 0, 112, 112).data;
+  const N = 112 * 112;
+  for (let i = 0, p = 0; i < N; i++) {
+    const r = img[p++], g = img[p++], b = img[p++]; p++;
+    recInput[i] = (r - 127.5) / 128;
+    recInput[N + i] = (g - 127.5) / 128;
+    recInput[2 * N + i] = (b - 127.5) / 128;
+  }
+  const tensor = new ort.Tensor('float32', recInput, [1, 3, 112, 112]);
+  const output = await recSess.run({ input: tensor });
+  const embedding = output['embedding']?.data;
+  if (!embedding || embedding.length !== 256) {
+    throw new Error('Recognition model returned an unexpected embedding size.');
+  }
+  return embedding;
+}
 async function predictSpoof(box) {
   const vw = video.videoWidth, vh = video.videoHeight;
   const bw = box.x2 - box.x1, bh = box.y2 - box.y1;
