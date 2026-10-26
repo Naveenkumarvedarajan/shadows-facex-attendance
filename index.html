@@ -793,7 +793,7 @@ async function predict3D(box) {
 }
 
 const recInput = new Float32Array(3 * 112 * 112);
-async function predictEmbedding(box) {
+async function predictSpoof(box) {
   const vw = video.videoWidth, vh = video.videoHeight;
   const bw = box.x2 - box.x1, bh = box.y2 - box.y1;
   const side = Math.max(bw, bh) * (1 + 2 * 0.15);
