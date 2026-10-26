@@ -1,3 +1,4 @@
+```
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2207,6 +2208,63 @@ btnStop.onclick = () => {
     console.error(e);
   }
 })();
+
+// Attendance bridge: runs inside the existing FaceX demo closure.
+const attendanceParams = new URLSearchParams(location.search);
+const attendanceMode = attendanceParams.get('attendance') === '1';
+const attendanceNonce = attendanceParams.get('nonce');
+const attendanceOrigin = attendanceParams.get('origin');
+let attendanceBusy = false;
+if (attendanceMode) {
+  const captureButton = document.createElement('button');
+  captureButton.className = 'btn primary';
+  captureButton.textContent = 'Verify face for attendance';
+  captureButton.disabled = true;
+  document.querySelector('.controls').appendChild(captureButton);
+  function notifyParent(type, payload = {}) {
+    if (!window.opener || !attendanceOrigin || !attendanceNonce) return;
+    window.opener.postMessage({type, nonce:attendanceNonce, ...payload}, attendanceOrigin);
+  }
+  const originalStart = btnStart.onclick;
+  btnStart.onclick = async function () {
+    await originalStart();
+    captureButton.disabled = !running;
+  };
+  captureButton.onclick = async function () {
+    if (attendanceBusy) return;
+    attendanceBusy = true; captureButton.disabled = true;
+    try {
+      if (!running || !recSess || !spoof27Sess || !spoof40Sess) throw new Error('Start camera and wait for models first.');
+      // Re-detect immediately rather than relying on stale display state.
+      const faces = await detect(video);
+      if (faces.length !== 1) throw new Error('Exactly one face must be visible.');
+      const face = faces[0];
+      const sp = await predictSpoof(face);
+      if (!(sp.live > SPOOF_THRESH)) throw new Error('Anti-spoof check failed.');
+      // Active challenge: require movement/blink, not just passive spoof classification.
+      mode = 'liveness';
+      startLiveness();
+      setStatus('Follow the liveness instruction shown on camera', 'loading');
+      const deadline = performance.now() + LIVENESS_TIMEOUT_MS + 1200;
+      while (performance.now() < deadline && !liveness.passed && !liveness.failed) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      if (!liveness.passed) throw new Error('Liveness challenge not passed. Retry.');
+      const latestFaces = await detect(video);
+      if (latestFaces.length !== 1) throw new Error('Keep exactly one face in frame.');
+      const sp2 = await predictSpoof(latestFaces[0]);
+      if (!(sp2.live > SPOOF_THRESH)) throw new Error('Anti-spoof check failed.');
+      const emb = Array.from(await predictEmbedding(latestFaces[0]));
+      if (emb.length !== 256 || !emb.every(Number.isFinite)) throw new Error('Unexpected model output dimension; expected 256.');
+      notifyParent('facex-attendance-result', {embedding:emb, livenessPassed:true});
+      setStatus('Face captured. You may close this window.', 'ready');
+    } catch (err) {
+      setStatus('Attendance capture failed: ' + err.message, 'error');
+      notifyParent('facex-attendance-error', {message:err.message});
+    } finally {attendanceBusy = false;captureButton.disabled = !running;}
+  };
+}
 </script>
 </body>
 </html>
+```
